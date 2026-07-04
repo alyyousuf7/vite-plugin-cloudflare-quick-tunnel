@@ -1,0 +1,64 @@
+{
+  "name": "vite-plugin-cloudflare-quick-tunnel",
+  "version": "0.1.0",
+  "description": "Expose the Vite dev or preview server through a Cloudflare quick tunnel",
+  "keywords": [
+    "vite",
+    "vite-plugin",
+    "cloudflare",
+    "tunnel",
+    "trycloudflare",
+    "quick-tunnel"
+  ],
+  "homepage": "https://github.com/alyyousuf7/vite-plugin-cloudflare-quick-tunnel#readme",
+  "bugs": {
+    "url": "https://github.com/alyyousuf7/vite-plugin-cloudflare-quick-tunnel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alyyousuf7/vite-plugin-cloudflare-quick-tunnel.git"
+  },
+  "license": "MIT",
+  "author": "Ali Yousuf (https://github.com/alyyousuf7)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
+    "prepack": "npm run build",
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "cloudflared": "0.7.1",
+    "picocolors": "^1.1.1",
+    "semver": "7.8.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.2",
+    "@types/semver": "7.7.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "vite": "^7.0.0 || ^8.0.0"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}
