@@ -5,7 +5,7 @@ import { gte } from "semver";
 import { createLogger, version as viteVersion, type Plugin, type ResolvedConfig } from "vite";
 
 import { formatTunnelUrl, resolveTunnelTarget, type TargetServer } from "./target.js";
-import { getQuickTunnel } from "./tunnel.js";
+import { getQuickTunnel } from "./quick-tunnel.js";
 
 export interface CloudflareQuickTunnelOptions {
   /**

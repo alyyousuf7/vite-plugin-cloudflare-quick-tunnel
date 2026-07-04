@@ -1,69 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getQuickTunnel, QuickTunnel, type TunnelLogger } from "../src/tunnel.js";
+import { Tunnel } from "../__mocks__/cloudflared.js";
+import { getQuickTunnel, QuickTunnel, type TunnelLogger } from "../src/quick-tunnel.js";
 
-interface FakeChild {
-  pid: number;
-  exitCode: number | null;
-  killed: boolean;
-  signals: string[];
-  kill(signal?: string): boolean;
-  exit(code: number): void;
-  once(event: string, listener: () => void): FakeChild;
-}
-
-interface FakeTunnel {
-  args: string[];
-  process: FakeChild;
-  emit(event: string, ...eventArgs: unknown[]): boolean;
-}
-
-const state = vi.hoisted(() => ({ instances: [] as unknown[] }));
-
-vi.mock("cloudflared", async () => {
-  const { EventEmitter } = await import("node:events");
-
-  class FakeChildImpl {
-    pid = 12345;
-    exitCode: number | null = null;
-    killed = false;
-    signals: string[] = [];
-    #events = new EventEmitter();
-
-    kill(signal?: string) {
-      this.signals.push(signal ?? "SIGTERM");
-      return true;
-    }
-
-    exit(code: number) {
-      this.exitCode = code;
-      this.#events.emit("exit");
-    }
-
-    once(event: string, listener: () => void) {
-      this.#events.once(event, listener);
-      return this;
-    }
-  }
-
-  class FakeTunnelImpl extends EventEmitter {
-    args: string[];
-    process = new FakeChildImpl();
-
-    constructor(args: string[]) {
-      super();
-      this.args = args;
-      state.instances.push(this);
-    }
-
-    stop() {
-      this.process.kill("SIGINT");
-      return true;
-    }
-  }
-
-  return { Tunnel: FakeTunnelImpl, use: vi.fn(), install: vi.fn() };
-});
+vi.mock("cloudflared");
 
 vi.mock("../src/cloudflared.js", () => ({
   ensureCloudflared: vi.fn(async () => "/fake/cloudflared"),
@@ -71,12 +11,16 @@ vi.mock("../src/cloudflared.js", () => ({
 
 const log: TunnelLogger = { info: () => {}, debug: () => {} };
 
-const lastTunnel = () => state.instances.at(-1) as FakeTunnel;
+const lastTunnel = () => {
+  const tunnel = Tunnel.instances.at(-1);
+  if (tunnel === undefined) throw new Error("no Tunnel spawned yet");
+  return tunnel;
+};
 
 describe("QuickTunnel", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    state.instances = [];
+    Tunnel.instances.length = 0;
   });
 
   afterEach(() => {
@@ -86,7 +30,7 @@ describe("QuickTunnel", () => {
   it("spawns cloudflared with the target and extra args, resolving on the url event", async () => {
     const quickTunnel = new QuickTunnel();
     const pending = quickTunnel.open("http://localhost:5173", log, ["--edge-ip-version", "4"]);
-    await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
     expect(lastTunnel().args).toEqual([
       "tunnel",
       "--no-autoupdate",
@@ -107,7 +51,7 @@ describe("QuickTunnel", () => {
   it("rejects when cloudflared exits before reporting a URL", async () => {
     const quickTunnel = new QuickTunnel();
     const pending = quickTunnel.open("http://localhost:5173", log);
-    await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
 
     lastTunnel().process.exitCode = 1;
     lastTunnel().emit("exit", 1, null);
@@ -118,7 +62,7 @@ describe("QuickTunnel", () => {
   it("rejects fast when Cloudflare rate-limits the tunnel request", async () => {
     const quickTunnel = new QuickTunnel();
     const pending = quickTunnel.open("http://localhost:5173", log);
-    await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
 
     // real cloudflared output, captured while rate-limited
     lastTunnel().emit("stderr", "2026-07-04T05:07:12Z ERR Error unmarshaling QuickTunnel response: error code: 1015");
@@ -131,7 +75,7 @@ describe("QuickTunnel", () => {
     async (code) => {
       const quickTunnel = new QuickTunnel();
       const pending = quickTunnel.open("http://localhost:5173", log);
-      await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+      await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
 
       lastTunnel().emit("stderr", `ERR Error unmarshaling QuickTunnel response: error code: ${code}`);
       await expect(pending).rejects.toThrow(new RegExp(`error ${code}: see https://developers\\.cloudflare\\.com`));
@@ -142,7 +86,7 @@ describe("QuickTunnel", () => {
     const quickTunnel = new QuickTunnel();
     const pending = quickTunnel.open("http://localhost:5173", log);
     pending.catch(() => {}); // observed below; avoid unhandled-rejection noise
-    await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
 
     await vi.advanceTimersByTimeAsync(30_000);
     await expect(pending).rejects.toThrow(/did not report a tunnel URL within/);
@@ -151,7 +95,7 @@ describe("QuickTunnel", () => {
   it("close() stops the process and escalates to SIGKILL if it lingers", async () => {
     const quickTunnel = new QuickTunnel();
     const pending = quickTunnel.open("http://localhost:5173", log);
-    await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
     lastTunnel().emit("url", "https://random.trycloudflare.com");
     await pending;
 
@@ -168,7 +112,7 @@ describe("QuickTunnel", () => {
   it("close() does not escalate once the process has exited", async () => {
     const quickTunnel = new QuickTunnel();
     const pending = quickTunnel.open("http://localhost:5173", log);
-    await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
     lastTunnel().emit("url", "https://random.trycloudflare.com");
     await pending;
 
@@ -182,13 +126,13 @@ describe("QuickTunnel", () => {
   it("opening again closes the previous tunnel", async () => {
     const quickTunnel = new QuickTunnel();
     const first = quickTunnel.open("http://localhost:5173", log);
-    await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
     lastTunnel().emit("url", "https://first.trycloudflare.com");
     await first;
     const firstChild = lastTunnel().process;
 
     const second = quickTunnel.open("http://localhost:8080", log);
-    await vi.waitFor(() => expect(state.instances).toHaveLength(2));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(2));
     lastTunnel().emit("url", "https://second.trycloudflare.com");
     await second;
 
@@ -199,7 +143,7 @@ describe("QuickTunnel", () => {
   it("survives a late error event without crashing", async () => {
     const quickTunnel = new QuickTunnel();
     const pending = quickTunnel.open("http://localhost:5173", log);
-    await vi.waitFor(() => expect(state.instances).toHaveLength(1));
+    await vi.waitFor(() => expect(Tunnel.instances).toHaveLength(1));
     lastTunnel().emit("url", "https://random.trycloudflare.com");
     await pending;
 
